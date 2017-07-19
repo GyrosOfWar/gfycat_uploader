@@ -13,7 +13,6 @@ extern crate env_logger;
 use std::process::Command;
 use std::collections::HashMap;
 use std::io::Read;
-use std::thread;
 use std::time::{Instant, Duration};
 
 use multipart::client::lazy::Multipart;
@@ -149,37 +148,25 @@ fn run() -> Result<()> {
     cut_file(in_file, &out_file, start, end)?;
     let client = reqwest::Client::new()?;
     let ticket = get_ticket(&client)?;
-    let gfy_name = ticket.gfy_name.clone();
     println!("Starting upload to https://gfycat.com/{}", ticket.gfy_name);
-    let thread = thread::spawn(move || {
-        if let Err(e) = upload_video(&client, &ticket.gfy_name, &out_file) {
-            println!("Failed to upload: {}", e);
-        }
-        println!("Upload finished, waiting for encode.");
-    });
-
-    let client = Client::new()?;
+    upload_video(&client, &ticket.gfy_name, &out_file)?;
+    println!("Upload finished. Waiting for encode.");
     let mut last = Instant::now();
     loop {
         if last.elapsed() > Duration::from_secs(5) {
             last = Instant::now();
-            let progress = get_progress(&client, &gfy_name)?;
+            let progress = get_progress(&client, &ticket.gfy_name)?;
             if let Some(task) = progress.task {
                 if task == "complete" {
                     println!(
-                        "Encoding finished. Finished gfycat at: https://gfycat.com/{}",
-                        gfy_name
+                        "Encoding finished! Finished gfycat at: https://gfycat.com/{}",
+                        ticket.gfy_name
                     );
                     break;
-                }
-                if task == "encoding" {
-                    println!("\rWaiting for encode..");
                 }
             }
         }
     }
-
-    let _ = thread.join();
     Ok(())
 }
 

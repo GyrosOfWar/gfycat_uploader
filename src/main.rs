@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate clap;
-extern crate reqwest;
+extern crate hyper;
+extern crate hyper_native_tls;
 #[macro_use]
 extern crate error_chain;
 extern crate serde;
@@ -12,13 +13,14 @@ extern crate env_logger;
 
 use std::process::Command;
 use std::collections::HashMap;
-use std::io::Read;
 use std::time::{Instant, Duration};
 
+use hyper::Client;
+use hyper::header::ContentType;
+use hyper::net::HttpsConnector;
+use hyper_native_tls::NativeTlsClient;
 use multipart::client::lazy::Multipart;
-use reqwest::Client;
-use reqwest::mime::{Mime, SubLevel, TopLevel, Value, Attr};
-use reqwest::header::ContentType;
+
 
 use errors::Result;
 
@@ -27,12 +29,12 @@ mod errors {
     use std::error::Error as StdError;
 
     use multipart::client::lazy::LazyError;
-    use reqwest;
 
     error_chain! {
         foreign_links {
             Io(io::Error);
-            Reqwest(reqwest::Error);
+            Hyper(::hyper::Error);
+            Json(::serde_json::Error);
         }
     }
 
@@ -80,44 +82,25 @@ pub fn cut_file(in_file: &str, out_file: &str, start: &str, end: &str) -> Result
     Ok(())
 }
 
-fn content_type(bound: &str) -> ContentType {
-    ContentType(multipart_mime(bound))
-}
-
-fn multipart_mime(bound: &str) -> Mime {
-    Mime(
-        TopLevel::Multipart,
-        SubLevel::Ext("form-data".into()),
-        vec![(Attr::Ext("boundary".into()), Value::Ext(bound.into()))],
-    )
-}
-
 pub fn get_ticket(client: &Client) -> Result<GfycatInfo> {
     let mut body = HashMap::new();
     body.insert("noMd5", "false");
-    let data: GfycatInfo = client
+    let body = serde_json::to_string(&body)?;
+    let response = client
         .post("https://api.gfycat.com/v1/gfycats")
         .header(ContentType::json())
-        .json(&body)
-        .send()?
-        .json()?;
+        .body(&body)
+        .send()?;
+    let data = serde_json::from_reader(response)?;
     Ok(data)
 }
 
 pub fn upload_video(client: &Client, gfy_name: &str, path: &str) -> Result<()> {
-    let mut multipart = Multipart::new()
+    Multipart::new()
         .add_file("file", path)
         .add_text("key", gfy_name)
-        .prepare()?;
-    let mut buf = vec![];
-    multipart.read_to_end(&mut buf)?;
-    let content_type = content_type(multipart.boundary());
+        .client_request(client, "https://filedrop.gfycat.com")?;
 
-    client
-        .post("https://filedrop.gfycat.com")
-        .header(content_type)
-        .body(buf)
-        .send()?;
     Ok(())
 }
 
@@ -126,7 +109,8 @@ pub fn get_progress(client: &Client, gfy_name: &str) -> Result<GfycatProgress> {
         "https://api.gfycat.com/v1/gfycats/fetch/status/{}",
         gfy_name
     );
-    let data: GfycatProgress = client.get(&url).send()?.json()?;
+    let response = client.get(&url).send()?;
+    let data = serde_json::from_reader(response)?;
     Ok(data)
 }
 
@@ -146,7 +130,12 @@ fn run() -> Result<()> {
     let end = matches.value_of("END").unwrap();
 
     cut_file(in_file, &out_file, start, end)?;
-    let client = reqwest::Client::new()?;
+    let client = {
+        let ssl = NativeTlsClient::new().unwrap();
+        let connector = HttpsConnector::new(ssl);
+        Client::with_connector(connector)
+    };
+
     let ticket = get_ticket(&client)?;
     println!("Starting upload to https://gfycat.com/{}", ticket.gfy_name);
     upload_video(&client, &ticket.gfy_name, &out_file)?;

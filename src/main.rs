@@ -14,6 +14,7 @@ use std::process::Command;
 use std::collections::HashMap;
 use std::io::Read;
 use std::time::{Duration, Instant};
+use std::path::Path;
 
 use multipart::client::lazy::Multipart;
 use reqwest::Client;
@@ -144,6 +145,10 @@ fn run() -> Result<()> {
     let out_file = matches.value_of("OUT_FILE").unwrap().to_string();
     let start = matches.value_of("START").unwrap();
     let end = matches.value_of("END").unwrap();
+
+    if !Path::new(in_file).is_file() {
+        println!("Input file {} does not exist!", in_file);
+    }
 
     cut_file(in_file, &out_file, start, end)?;
     let client = reqwest::Client::new()?;

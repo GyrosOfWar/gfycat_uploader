@@ -13,11 +13,11 @@ extern crate env_logger;
 use std::process::Command;
 use std::collections::HashMap;
 use std::io::Read;
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
 
 use multipart::client::lazy::Multipart;
 use reqwest::Client;
-use reqwest::mime::{Mime, SubLevel, TopLevel, Value, Attr};
+use reqwest::mime::{Attr, Mime, SubLevel, TopLevel, Value};
 use reqwest::header::ContentType;
 
 use errors::Result;

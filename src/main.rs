@@ -105,6 +105,7 @@ pub fn get_ticket(client: &Client) -> Result<GfycatInfo> {
     Ok(data)
 }
 
+// TODO: Once reqwest multipart support lands, replace with that
 pub fn upload_video(client: &Client, gfy_name: &str, path: &str) -> Result<()> {
     let mut multipart = Multipart::new()
         .add_file("file", path)
@@ -132,7 +133,7 @@ pub fn get_progress(client: &Client, gfy_name: &str) -> Result<GfycatProgress> {
 }
 
 fn run() -> Result<()> {
-    let matches = clap_app!(gfycat_uploader => 
+    let matches = clap_app!(gfycat_uploader =>
         (version: crate_version!())
         (author: crate_authors!())
         (about: "Uploads files to gfycat")

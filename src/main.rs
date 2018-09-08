@@ -1,51 +1,22 @@
-#[macro_use]
-extern crate clap;
 extern crate reqwest;
-#[macro_use]
-extern crate error_chain;
 extern crate serde;
 extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
-extern crate multipart;
 extern crate env_logger;
+extern crate failure;
+#[macro_use]
+extern crate structopt;
 
-use std::process::Command;
 use std::collections::HashMap;
-use std::io::Read;
+use std::path::PathBuf;
+use std::process::Command;
 use std::time::{Duration, Instant};
-use std::path::Path;
 
-use multipart::client::lazy::Multipart;
-use reqwest::Client;
-use reqwest::mime::{Attr, Mime, SubLevel, TopLevel, Value};
 use reqwest::header::ContentType;
+use reqwest::Client;
 
-use errors::Result;
-
-mod errors {
-    use std::io;
-    use std::error::Error as StdError;
-
-    use multipart::client::lazy::LazyError;
-    use reqwest;
-
-    error_chain! {
-        foreign_links {
-            Io(io::Error);
-            Reqwest(reqwest::Error);
-        }
-    }
-
-    impl<'a, E> From<LazyError<'a, E>> for Error
-    where
-        E: StdError,
-    {
-        fn from(err: LazyError<'a, E>) -> Error {
-            Error::from(format!("{}", err))
-        }
-    }
-}
+type Result<T> = std::result::Result<T, failure::Error>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GfycatInfo {
@@ -65,32 +36,11 @@ pub struct GfycatProgress {
 
 pub fn cut_file(in_file: &str, out_file: &str, start: &str, end: &str) -> Result<()> {
     let args = &[
-        "-y",
-        "-i",
-        in_file,
-        "-ss",
-        start,
-        "-to",
-        end,
-        "-c",
-        "copy",
-        out_file,
+        "-y", "-i", in_file, "-ss", start, "-to", end, "-c", "copy", out_file,
     ];
     println!("Cutting file {} into output {}", in_file, out_file);
     Command::new("ffmpeg").args(args).output()?;
     Ok(())
-}
-
-fn content_type(bound: &str) -> ContentType {
-    ContentType(multipart_mime(bound))
-}
-
-fn multipart_mime(bound: &str) -> Mime {
-    Mime(
-        TopLevel::Multipart,
-        SubLevel::Ext("form-data".into()),
-        vec![(Attr::Ext("boundary".into()), Value::Ext(bound.into()))],
-    )
 }
 
 pub fn get_ticket(client: &Client) -> Result<GfycatInfo> {
@@ -105,20 +55,16 @@ pub fn get_ticket(client: &Client) -> Result<GfycatInfo> {
     Ok(data)
 }
 
-// TODO: Once reqwest multipart support lands, replace with that
 pub fn upload_video(client: &Client, gfy_name: &str, path: &str) -> Result<()> {
-    let mut multipart = Multipart::new()
-        .add_file("file", path)
-        .add_text("key", gfy_name)
-        .prepare()?;
-    let mut buf = vec![];
-    multipart.read_to_end(&mut buf)?;
-    let content_type = content_type(multipart.boundary());
+    use reqwest::multipart::Form;
+
+    let form = Form::new()
+        .text("key", gfy_name.to_string())
+        .file("file", path)?;
 
     client
         .post("https://filedrop.gfycat.com")
-        .header(content_type)
-        .body(buf)
+        .multipart(form)
         .send()?;
     Ok(())
 }
@@ -132,31 +78,41 @@ pub fn get_progress(client: &Client, gfy_name: &str) -> Result<GfycatProgress> {
     Ok(data)
 }
 
-fn run() -> Result<()> {
-    let matches = clap_app!(gfycat_uploader =>
-        (version: crate_version!())
-        (author: crate_authors!())
-        (about: "Uploads files to gfycat")
-        (@arg IN_FILE: +required "Input video file")
-        (@arg OUT_FILE: +required "Output video file")
-        (@arg START: +required "Start time")
-        (@arg END: +required "End time")
-    ).get_matches();
-    let in_file = matches.value_of("IN_FILE").unwrap();
-    let out_file = matches.value_of("OUT_FILE").unwrap().to_string();
-    let start = matches.value_of("START").unwrap();
-    let end = matches.value_of("END").unwrap();
+#[derive(Clone, Debug, StructOpt)]
+pub struct Args {
+    #[structopt(parse(from_os_str))]
+    in_file: PathBuf,
 
-    if !Path::new(in_file).is_file() {
-        println!("Input file {} does not exist!", in_file);
+    #[structopt(parse(from_os_str))]
+    out_file: PathBuf,
+
+    start: String,
+
+    end: String,
+}
+
+fn main() -> Result<()> {
+    use structopt::StructOpt;
+
+    let Args {
+        in_file,
+        out_file,
+        start,
+        end,
+    } = Args::from_args();
+
+    if !in_file.is_file() {
+        println!("Input file {} does not exist!", in_file.display());
     }
 
-    cut_file(in_file, &out_file, start, end)?;
-    let client = reqwest::Client::new()?;
+    let in_file_str = in_file.display().to_string();
+    let out_file_str = out_file.display().to_string();
+    cut_file(&in_file_str, &out_file_str, &start, &end)?;
+    let client = reqwest::Client::new();
     let ticket = get_ticket(&client)?;
     println!("Starting upload to https://gfycat.com/{}", ticket.gfy_name);
-    upload_video(&client, &ticket.gfy_name, &out_file)?;
-    println!("Upload finished. Waiting for encode.");
+    upload_video(&client, &ticket.gfy_name, &out_file_str)?;
+    println!("Upload finished. Waiting for encoding to finish.");
     let mut last = Instant::now();
     loop {
         if last.elapsed() > Duration::from_secs(5) {
@@ -174,10 +130,4 @@ fn run() -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn main() {
-    if let Err(e) = run() {
-        println!("Error: {}", e);
-    }
 }

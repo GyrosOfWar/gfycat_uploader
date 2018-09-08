@@ -73,7 +73,8 @@ pub fn upload_video(client: &Client, gfy_name: &str, path: &str) -> Result<()> {
     client
         .post("https://filedrop.gfycat.com")
         .multipart(form)
-        .send()?;
+        .send()?
+        .error_for_status()?;
     Ok(())
 }
 
@@ -82,7 +83,7 @@ pub fn get_progress(client: &Client, gfy_name: &str) -> Result<GfycatProgress> {
         "https://api.gfycat.com/v1/gfycats/fetch/status/{}",
         gfy_name
     );
-    let data: GfycatProgress = client.get(&url).send()?.json()?;
+    let data: GfycatProgress = client.get(&url).send()?.error_for_status()?.json()?;
     Ok(data)
 }
 

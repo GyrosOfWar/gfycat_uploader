@@ -8,12 +8,8 @@ extern crate failure;
 #[macro_use]
 extern crate structopt;
 
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Command;
-use std::time::{Duration, Instant};
 
-use reqwest::header::ContentType;
 use reqwest::Client;
 
 type Result<T> = std::result::Result<T, failure::Error>;
@@ -34,21 +30,33 @@ pub struct GfycatProgress {
     pub time: Option<i32>,
 }
 
-pub fn cut_file(in_file: &str, out_file: &str, start: &str, end: &str) -> Result<()> {
+pub fn cut_file(input_file: &str, output_file: &str, start: &str, end: &str) -> Result<()> {
+    use std::process::Command;
+
     let args = &[
-        "-y", "-i", in_file, "-ss", start, "-to", end, "-c", "copy", out_file,
+        "-y",
+        "-i",
+        input_file,
+        "-ss",
+        start,
+        "-to",
+        end,
+        "-c",
+        "copy",
+        output_file,
     ];
-    println!("Cutting file {} into output {}", in_file, out_file);
+    println!("Cutting file '{}' from {} to {}", input_file, start, end);
     Command::new("ffmpeg").args(args).output()?;
     Ok(())
 }
 
 pub fn get_ticket(client: &Client) -> Result<GfycatInfo> {
+    use std::collections::HashMap;
+
     let mut body = HashMap::new();
     body.insert("noMd5", "false");
     let data: GfycatInfo = client
         .post("https://api.gfycat.com/v1/gfycats")
-        .header(ContentType::json())
         .json(&body)
         .send()?
         .json()?;
@@ -81,10 +89,7 @@ pub fn get_progress(client: &Client, gfy_name: &str) -> Result<GfycatProgress> {
 #[derive(Clone, Debug, StructOpt)]
 pub struct Args {
     #[structopt(parse(from_os_str))]
-    in_file: PathBuf,
-
-    #[structopt(parse(from_os_str))]
-    out_file: PathBuf,
+    input_file: PathBuf,
 
     start: String,
 
@@ -92,42 +97,41 @@ pub struct Args {
 }
 
 fn main() -> Result<()> {
+    use std::thread;
+    use std::time::Duration;
     use structopt::StructOpt;
 
     let Args {
-        in_file,
-        out_file,
+        input_file,
         start,
         end,
     } = Args::from_args();
+    let output_file = "out.mp4";
 
-    if !in_file.is_file() {
-        println!("Input file {} does not exist!", in_file.display());
+    if !input_file.is_file() {
+        println!("Input file {} does not exist!", input_file.display());
     }
 
-    let in_file_str = in_file.display().to_string();
-    let out_file_str = out_file.display().to_string();
-    cut_file(&in_file_str, &out_file_str, &start, &end)?;
-    let client = reqwest::Client::new();
+    let input_file_str = input_file.display().to_string();
+    cut_file(&input_file_str, output_file, &start, &end)?;
+    let client = Client::new();
     let ticket = get_ticket(&client)?;
     println!("Starting upload to https://gfycat.com/{}", ticket.gfy_name);
-    upload_video(&client, &ticket.gfy_name, &out_file_str)?;
+    upload_video(&client, &ticket.gfy_name, output_file)?;
     println!("Upload finished. Waiting for encoding to finish.");
-    let mut last = Instant::now();
     loop {
-        if last.elapsed() > Duration::from_secs(5) {
-            last = Instant::now();
-            let progress = get_progress(&client, &ticket.gfy_name)?;
-            if let Some(task) = progress.task {
-                if task == "complete" {
-                    println!(
-                        "Encoding finished! Finished gfycat at: https://gfycat.com/{}",
-                        ticket.gfy_name
-                    );
-                    break;
-                }
+        let progress = get_progress(&client, &ticket.gfy_name)?;
+        if let Some(task) = progress.task {
+            if task == "complete" {
+                println!(
+                    "Encoding finished! Finished gfycat at: https://gfycat.com/{}",
+                    ticket.gfy_name
+                );
+                break;
             }
         }
+
+        thread::sleep(Duration::from_secs(5));
     }
     Ok(())
 }

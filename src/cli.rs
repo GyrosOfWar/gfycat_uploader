@@ -1,22 +1,14 @@
 use error::Result;
-use upload::{cut_file, get_ticket, upload_video, get_progress};
-use std::path::PathBuf;
 use reqwest::Client;
+use std::path::PathBuf;
+use upload::{cut_file, get_progress, get_ticket, upload_video};
 
 #[derive(Clone, Debug, StructOpt)]
 pub struct Args {
-    #[structopt(
-        short = "s",
-        long = "start",
-        help = "time at which to start the video"
-    )]
+    #[structopt(short = "s", long = "start", help = "time at which to start the video")]
     start_time: Option<String>,
 
-    #[structopt(
-        short = "e",
-        long = "end",
-        help = "time at which to end the video"
-    )]
+    #[structopt(short = "e", long = "end", help = "time at which to end the video")]
     end_time: Option<String>,
 
     #[structopt(short = "v", long = "verbose", help = "verbose output")]

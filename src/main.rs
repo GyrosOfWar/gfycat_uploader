@@ -10,10 +10,10 @@ extern crate failure;
 extern crate structopt;
 extern crate azul;
 
-mod gui;
 mod cli;
-mod upload;
 mod error;
+mod gui;
+mod upload;
 
 use error::Result;
 
